@@ -65,7 +65,6 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
     const updated = [...stats]
     updated[index] = { ...updated[index], [field]: value }
     
-    // Bockar i "Deltog" automatiskt om man matar in statistik
     if (typeof value === 'number' && value !== 0) {
       updated[index].played = true
     }
@@ -76,7 +75,6 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
   const handleSaveMatch = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Enbart spelare som är ikryssade sparas
     const activeStats = stats.filter((s) => s.played)
 
     if (activeStats.length === 0) {
@@ -126,65 +124,64 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
   const goalKeepers = stats.filter((s) => s.position === 'Målvakt')
 
   return (
-    <form onSubmit={handleSaveMatch} className="space-y-6 max-w-4xl mx-auto p-4">
-      <h2 className="text-xl font-bold">Lägg till match & statistik</h2>
+    <form onSubmit={handleSaveMatch} style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
+      <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>Lägg till match & statistik</h2>
       
-      <div className="flex gap-4">
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '25px' }}>
         <input
           type="text"
           placeholder="Motståndare"
           value={opponent}
           onChange={(e) => setOpponent(e.target.value)}
           required
-          className="border p-2 rounded flex-1"
+          style={{ padding: '8px', borderRadius: '4px' }}
         />
         <input
           type="date"
           value={matchDate}
           onChange={(e) => setMatchDate(e.target.value)}
           required
-          className="border p-2 rounded"
+          style={{ padding: '8px', borderRadius: '4px' }}
         />
       </div>
 
       {/* UTESPELARE */}
-      <div className="space-y-2">
-        <h3 className="font-semibold text-lg">Utespelare</h3>
+      <div style={{ marginBottom: '30px' }}>
+        <h3 style={{ textAlign: 'center', marginBottom: '15px' }}>Utespelare</h3>
         {fieldPlayers.map((player) => {
           const originalIndex = stats.findIndex((s) => s.player_id === player.player_id)
           return (
-            <div key={player.player_id} className="flex items-center gap-3 border-b py-2">
+            <div key={player.player_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
               <input
                 type="checkbox"
                 checked={player.played}
                 onChange={(e) => handleStatChange(originalIndex, 'played', e.target.checked)}
-                className="w-4 h-4"
               />
-              <span className="w-40 font-medium">{player.name}</span>
-              <div className="flex gap-2 items-center">
-                <label className="text-sm">Mål:</label>
+              <span style={{ width: '180px', fontWeight: 'bold' }}>{player.name}</span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <label>Mål:</label>
                 <input
                   type="number"
                   min="0"
                   value={player.goals}
                   onChange={(e) => handleStatChange(originalIndex, 'goals', parseInt(e.target.value) || 0)}
-                  className="w-16 border p-1 rounded"
+                  style={{ width: '50px', textAlign: 'center' }}
                 />
-                <label className="text-sm">Ass:</label>
+                <label>Ass:</label>
                 <input
                   type="number"
                   min="0"
                   value={player.assists}
                   onChange={(e) => handleStatChange(originalIndex, 'assists', parseInt(e.target.value) || 0)}
-                  className="w-16 border p-1 rounded"
+                  style={{ width: '50px', textAlign: 'center' }}
                 />
-                <label className="text-sm">UTV:</label>
+                <label>UTV:</label>
                 <input
                   type="number"
                   min="0"
                   value={player.penalties}
                   onChange={(e) => handleStatChange(originalIndex, 'penalties', parseInt(e.target.value) || 0)}
-                  className="w-16 border p-1 rounded"
+                  style={{ width: '50px', textAlign: 'center' }}
                 />
               </div>
             </div>
@@ -193,35 +190,34 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
       </div>
 
       {/* MÅLVAKTER */}
-      <div className="space-y-2">
-        <h3 className="font-semibold text-lg">Målvakter</h3>
+      <div style={{ marginBottom: '30px' }}>
+        <h3 style={{ textAlign: 'center', marginBottom: '15px' }}>Målvakter</h3>
         {goalKeepers.map((gk) => {
           const originalIndex = stats.findIndex((s) => s.player_id === gk.player_id)
           return (
-            <div key={gk.player_id} className="flex items-center gap-3 border-b py-2 bg-slate-50 p-2 rounded">
+            <div key={gk.player_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
               <input
                 type="checkbox"
                 checked={gk.played}
                 onChange={(e) => handleStatChange(originalIndex, 'played', e.target.checked)}
-                className="w-4 h-4"
               />
-              <span className="w-40 font-medium">{gk.name}</span>
-              <div className="flex gap-2 items-center">
-                <label className="text-sm">Insläppta:</label>
+              <span style={{ width: '180px', fontWeight: 'bold' }}>{gk.name}</span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <label>Insläppta:</label>
                 <input
                   type="number"
                   min="0"
                   value={gk.goals_against}
                   onChange={(e) => handleStatChange(originalIndex, 'goals_against', parseInt(e.target.value) || 0)}
-                  className="w-16 border p-1 rounded"
+                  style={{ width: '50px', textAlign: 'center' }}
                 />
-                <label className="text-sm">Räddningar:</label>
+                <label>Räddningar:</label>
                 <input
                   type="number"
                   min="0"
                   value={gk.saves}
                   onChange={(e) => handleStatChange(originalIndex, 'saves', parseInt(e.target.value) || 0)}
-                  className="w-16 border p-1 rounded"
+                  style={{ width: '50px', textAlign: 'center' }}
                 />
               </div>
             </div>
@@ -229,13 +225,15 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
         })}
       </div>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-      >
-        {loading ? 'Sparar...' : 'Spara statistik för matchen'}
-      </button>
+      <div style={{ textAlign: 'center' }}>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ padding: '10px 20px', cursor: 'pointer' }}
+        >
+          {loading ? 'Sparar...' : 'Spara statistik för matchen'}
+        </button>
+      </div>
     </form>
   )
 }
