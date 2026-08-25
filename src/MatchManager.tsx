@@ -1,241 +1,393 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import type { FormEvent } from 'react'
 import { supabase } from './supabase'
 
-interface Player {
-  id: string
-  name: string
-  position: 'Utespelare' | 'Målvakt'
+interface MatchManagerProps {
+  onStatsUpdated: () => void
+  refreshKey: number
+  selectedMatchId: string
+  setSelectedMatchId: (id: string) => void
 }
 
-interface PlayerStatInput {
-  player_id: string
-  name: string
-  position: 'Utespelare' | 'Målvakt'
-  played: boolean
-  goals: number
-  assists: number
-  penalties: number
-  goals_against: number
-  saves: number
-}
-
-export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchAdded }) => {
-  const [opponent, setOpponent] = useState('')
-  const [matchDate, setMatchDate] = useState(new Date().toISOString().split('T')[0])
-  const [stats, setStats] = useState<PlayerStatInput[]>([])
-  const [loading, setLoading] = useState(false)
+export default function MatchManager({
+  onStatsUpdated,
+  refreshKey,
+  selectedMatchId,
+  setSelectedMatchId,
+}: MatchManagerProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [newMatchName, setNewMatchName] = useState('')
+  const [matches, setMatches] = useState<any[]>([])
+  const [players, setPlayers] = useState<any[]>([])
+  const [stats, setStats] = useState<Record<string, any>>({})
 
   useEffect(() => {
-    const fetchPlayers = async () => {
-      const { data, error } = await supabase
-        .from('players')
-        .select('*')
-        .order('name')
-
-      if (error) {
-        console.error('Kunde inte hämta spelare:', error)
-        return
-      }
-
-      if (data) {
-        setStats(
-          data.map((p: Player) => ({
-            player_id: p.id,
-            name: p.name,
-            position: p.position,
-            played: false,
-            goals: 0,
-            assists: 0,
-            penalties: 0,
-            goals_against: 0,
-            saves: 0,
-          }))
-        )
-      }
-    }
-
+    fetchMatches()
     fetchPlayers()
-  }, [])
+  }, [refreshKey])
 
-  const handleStatChange = (
-    index: number,
-    field: keyof PlayerStatInput,
-    value: number | boolean
-  ) => {
-    const updated = [...stats]
-    updated[index] = { ...updated[index], [field]: value }
-    
-    if (typeof value === 'number' && value !== 0) {
-      updated[index].played = true
+  useEffect(() => {
+    if (selectedMatchId) {
+      fetchMatchStats(selectedMatchId)
+    } else {
+      setStats({})
     }
-    
-    setStats(updated)
+  }, [selectedMatchId])
+
+  const fetchMatches = async () => {
+    const { data } = await supabase
+      .from('matches')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (data) setMatches(data)
   }
 
-  const handleSaveMatch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    const activeStats = stats.filter((s) => s.played)
+  const fetchPlayers = async () => {
+    const { data } = await supabase.from('players').select('*').order('name')
+    if (data) setPlayers(data)
+  }
 
-    if (activeStats.length === 0) {
-      alert('Välj minst en spelare som deltog i matchen.')
+  const fetchMatchStats = async (matchId: string) => {
+    const { data } = await supabase
+      .from('player_match_stats')
+      .select('*')
+      .eq('match_id', matchId)
+
+    if (data) {
+      const statsMap: Record<string, any> = {}
+      data.forEach((row) => {
+        statsMap[row.player_id] = {
+          goals: row.goals || 0,
+          assists: row.assists || 0,
+          penalty_minutes: row.penalty_minutes || 0,
+          plus_minus: row.plus_minus || 0,
+          wins: row.wins || 0,
+          saves: row.saves || 0,
+          goals_against: row.goals_against || 0,
+        }
+      })
+      setStats(statsMap)
+    }
+  }
+
+  const handleCreateMatch = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!newMatchName.trim()) return
+
+    const { data, error } = await supabase
+      .from('matches')
+      .insert([{ name: newMatchName.trim() }])
+      .select()
+
+    if (error) {
+      alert('Kunde inte skapa match: ' + error.message)
+    } else if (data && data[0]) {
+      setNewMatchName('')
+      await fetchMatches()
+      setSelectedMatchId(data[0].id)
+      alert('Match skapad! Du kan nu fylla i statistik nedan.')
+    }
+  }
+
+  const handleStatChange = (playerId: string, field: string, value: number) => {
+    setStats((prev) => ({
+      ...prev,
+      [playerId]: {
+        ...(prev[playerId] || {
+          goals: 0,
+          assists: 0,
+          penalty_minutes: 0,
+          plus_minus: 0,
+          wins: 0,
+          saves: 0,
+          goals_against: 0,
+        }),
+        [field]: value,
+      },
+    }))
+  }
+
+  const handleSaveStats = async () => {
+    if (!selectedMatchId) {
+      alert('Välj en match först!')
       return
     }
 
-    setLoading(true)
+    const rowsToUpsert = players.map((p) => {
+      const pStats = stats[p.id] || {}
+      return {
+        match_id: selectedMatchId,
+        player_id: p.id,
+        goals: pStats.goals || 0,
+        assists: pStats.assists || 0,
+        penalty_minutes: pStats.penalty_minutes || 0,
+        plus_minus: pStats.plus_minus || 0,
+        wins: pStats.wins || 0,
+        saves: pStats.saves || 0,
+        goals_against: pStats.goals_against || 0,
+      }
+    })
 
-    try {
-      const { data: matchData, error: matchError } = await supabase
-        .from('matches')
-        .insert([{ opponent, match_date: matchDate }])
-        .select()
-        .single()
+    const { error } = await supabase
+      .from('player_match_stats')
+      .upsert(rowsToUpsert, { onConflict: 'player_id,match_id' })
 
-      if (matchError) throw matchError
-
-      const matchStatsToInsert = activeStats.map((s) => ({
-        match_id: matchData.id,
-        player_id: s.player_id,
-        goals: s.position === 'Utespelare' ? s.goals : 0,
-        assists: s.position === 'Utespelare' ? s.assists : 0,
-        penalties: s.penalties,
-        goals_against: s.position === 'Målvakt' ? s.goals_against : 0,
-        saves: s.position === 'Målvakt' ? s.saves : 0,
-      }))
-
-      const { error: statsError } = await supabase
-        .from('player_match_stats')
-        .insert(matchStatsToInsert)
-
-      if (statsError) throw statsError
-
-      alert('Matchen och statistiken har sparats!')
-      setOpponent('')
-      setStats(stats.map((s) => ({ ...s, played: false, goals: 0, assists: 0, penalties: 0, goals_against: 0, saves: 0 })))
-      if (onMatchAdded) onMatchAdded()
-    } catch (err: any) {
-      alert(`Kunde inte spara statistik: ${err.message}`)
-    } finally {
-      setLoading(false)
+    if (error) {
+      alert('Kunde inte spara statistik: ' + error.message)
+    } else {
+      alert('Statistik sparad!')
+      onStatsUpdated()
     }
   }
 
-  const fieldPlayers = stats.filter((s) => s.position === 'Utespelare')
-  const goalKeepers = stats.filter((s) => s.position === 'Målvakt')
-
   return (
-    <form onSubmit={handleSaveMatch} style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-      <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>Lägg till match & statistik</h2>
-      
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '25px' }}>
-        <input
-          type="text"
-          placeholder="Motståndare"
-          value={opponent}
-          onChange={(e) => setOpponent(e.target.value)}
-          required
-          style={{ padding: '8px', borderRadius: '4px' }}
-        />
-        <input
-          type="date"
-          value={matchDate}
-          onChange={(e) => setMatchDate(e.target.value)}
-          required
-          style={{ padding: '8px', borderRadius: '4px' }}
-        />
-      </div>
+    <div
+      style={{
+        backgroundColor: '#003A73',
+        borderRadius: '12px',
+        color: '#E8E8E8',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        border: '1px solid #0059B3',
+        overflow: 'hidden',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          width: '100%',
+          backgroundColor: 'transparent',
+          border: 'none',
+          padding: '24px',
+          color: '#FFD25F',
+          fontSize: '24px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '10px',
+        }}
+      >
+        <span>{isOpen ? '▼' : '►'}</span> Matchhantering & Registrering
+      </button>
 
-      {/* UTESPELARE */}
-      <div style={{ marginBottom: '30px' }}>
-        <h3 style={{ textAlign: 'center', marginBottom: '15px' }}>Utespelare</h3>
-        {fieldPlayers.map((player) => {
-          const originalIndex = stats.findIndex((s) => s.player_id === player.player_id)
-          return (
-            <div key={player.player_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-              <input
-                type="checkbox"
-                checked={player.played}
-                onChange={(e) => handleStatChange(originalIndex, 'played', e.target.checked)}
-              />
-              <span style={{ width: '180px', fontWeight: 'bold' }}>{player.name}</span>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <label>Mål:</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={player.goals}
-                  onChange={(e) => handleStatChange(originalIndex, 'goals', parseInt(e.target.value) || 0)}
-                  style={{ width: '50px', textAlign: 'center' }}
-                />
-                <label>Ass:</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={player.assists}
-                  onChange={(e) => handleStatChange(originalIndex, 'assists', parseInt(e.target.value) || 0)}
-                  style={{ width: '50px', textAlign: 'center' }}
-                />
-                <label>UTV:</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={player.penalties}
-                  onChange={(e) => handleStatChange(originalIndex, 'penalties', parseInt(e.target.value) || 0)}
-                  style={{ width: '50px', textAlign: 'center' }}
-                />
+      {isOpen && (
+        <div style={{ padding: '0 24px 24px 24px' }}>
+          {/* Skapa ny match */}
+          <form
+            onSubmit={handleCreateMatch}
+            style={{
+              display: 'flex',
+              gap: '12px',
+              marginBottom: '20px',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Matchnamn (t.ex. Lag A vs Lag B)"
+              value={newMatchName}
+              onChange={(e) => setNewMatchName(e.target.value)}
+              style={{
+                flex: 1,
+                minWidth: '200px',
+                padding: '10px',
+                borderRadius: '6px',
+                border: '1px solid #0059B3',
+                backgroundColor: '#002850',
+                color: '#E8E8E8',
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                padding: '10px 18px',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: '#FFD25F',
+                color: '#002850',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              + Skapa match
+            </button>
+          </form>
+
+          {/* Välj match att redigera */}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>
+              Välj match att fylla i / ändra statistik för:
+            </label>
+            <select
+              value={selectedMatchId}
+              onChange={(e) => setSelectedMatchId(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '6px',
+                border: '1px solid #0059B3',
+                backgroundColor: '#002850',
+                color: '#E8E8E8',
+              }}
+            >
+              <option value="">-- Välj en match --</option>
+              {matches.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({new Date(m.created_at).toLocaleDateString('sv-SE')})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Registrera stats för vald match */}
+          {selectedMatchId && (
+            <div>
+              <h3 style={{ color: '#FFD25F', marginBottom: '12px' }}>Fyll i statistik:</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#001F3F', color: '#FFD25F', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>Spelare</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Mål</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Ass</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>UTV</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>+/-</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Vinst</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Räddn.</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Insläppta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {players.map((p) => {
+                      const pStats = stats[p.id] || {}
+                      const isGoalie = p.position === 'Målvakt'
+
+                      return (
+                        <tr key={p.id} style={{ borderBottom: '1px solid #002850' }}>
+                          <td style={{ padding: '8px', fontWeight: 'bold' }}>
+                            {p.name} <span style={{ fontSize: '11px', color: '#B0C4DE' }}>({p.position})</span>
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              value={pStats.goals ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(p.id, 'goals', parseInt(e.target.value) || 0)
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              value={pStats.assists ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(p.id, 'assists', parseInt(e.target.value) || 0)
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              value={pStats.penalty_minutes ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(
+                                  p.id,
+                                  'penalty_minutes',
+                                  parseInt(e.target.value) || 0
+                                )
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              value={pStats.plus_minus ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(
+                                  p.id,
+                                  'plus_minus',
+                                  parseInt(e.target.value) || 0
+                                )
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              disabled={!isGoalie}
+                              checked={pStats.wins === 1}
+                              onChange={(e) =>
+                                handleStatChange(p.id, 'wins', e.target.checked ? 1 : 0)
+                              }
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              disabled={!isGoalie}
+                              value={pStats.saves ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(p.id, 'saves', parseInt(e.target.value) || 0)
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              disabled={!isGoalie}
+                              value={pStats.goals_against ?? 0}
+                              onChange={(e) =>
+                                handleStatChange(
+                                  p.id,
+                                  'goals_against',
+                                  parseInt(e.target.value) || 0
+                                )
+                              }
+                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </div>
-          )
-        })}
-      </div>
 
-      {/* MÅLVAKTER */}
-      <div style={{ marginBottom: '30px' }}>
-        <h3 style={{ textAlign: 'center', marginBottom: '15px' }}>Målvakter</h3>
-        {goalKeepers.map((gk) => {
-          const originalIndex = stats.findIndex((s) => s.player_id === gk.player_id)
-          return (
-            <div key={gk.player_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '10px' }}>
-              <input
-                type="checkbox"
-                checked={gk.played}
-                onChange={(e) => handleStatChange(originalIndex, 'played', e.target.checked)}
-              />
-              <span style={{ width: '180px', fontWeight: 'bold' }}>{gk.name}</span>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <label>Insläppta:</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={gk.goals_against}
-                  onChange={(e) => handleStatChange(originalIndex, 'goals_against', parseInt(e.target.value) || 0)}
-                  style={{ width: '50px', textAlign: 'center' }}
-                />
-                <label>Räddningar:</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={gk.saves}
-                  onChange={(e) => handleStatChange(originalIndex, 'saves', parseInt(e.target.value) || 0)}
-                  style={{ width: '50px', textAlign: 'center' }}
-                />
-              </div>
+              <button
+                type="button"
+                onClick={handleSaveStats}
+                style={{
+                  marginTop: '16px',
+                  padding: '12px 24px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: '#FFD25F',
+                  color: '#002850',
+                  fontWeight: 'bold',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  width: '100%',
+                }}
+              >
+                💾 Spara statistik för matchen
+              </button>
             </div>
-          )
-        })}
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <button
-          type="submit"
-          disabled={loading}
-          style={{ padding: '10px 20px', cursor: 'pointer' }}
-        >
-          {loading ? 'Sparar...' : 'Spara statistik för matchen'}
-        </button>
-      </div>
-    </form>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
-
-export default MatchManager
