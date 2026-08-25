@@ -239,3 +239,5 @@ export const MatchManager: React.FC<{ onMatchAdded?: () => void }> = ({ onMatchA
     </form>
   )
 }
+
+export default MatchManager
