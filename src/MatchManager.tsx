@@ -89,22 +89,34 @@ export default function MatchManager({
     }
   }
 
-  const handleStatChange = (playerId: string, field: string, value: number) => {
-    setStats((prev) => ({
-      ...prev,
-      [playerId]: {
-        ...(prev[playerId] || {
-          goals: 0,
-          assists: 0,
-          penalty_minutes: 0,
-          plus_minus: 0,
-          wins: 0,
-          saves: 0,
-          goals_against: 0,
-        }),
-        [field]: value,
-      },
-    }))
+  const handleStatChange = (playerId: string, field: string, value: any) => {
+    setStats((prev) => {
+      const current = prev[playerId] || {
+        played: false,
+        goals: 0,
+        assists: 0,
+        penalty_minutes: 0,
+        plus_minus: 0,
+        wins: 0,
+        saves: 0,
+        goals_against: 0,
+      }
+
+      // Om man skriver in siffror (andra än 0), bocka i Deltog automatiskt
+      let autoPlayed = current.played
+      if (field !== 'played' && typeof value === 'number' && value !== 0) {
+        autoPlayed = true
+      }
+
+      return {
+        ...prev,
+        [playerId]: {
+          ...current,
+          played: field === 'played' ? value : autoPlayed,
+          [field]: value,
+        },
+      }
+    })
   }
 
   const handleSaveStats = async () => {
@@ -113,31 +125,44 @@ export default function MatchManager({
       return
     }
 
-    const rowsToUpsert = players.map((p) => {
-      const pStats = stats[p.id] || {}
-      return {
-        match_id: selectedMatchId,
-        player_id: p.id,
-        goals: pStats.goals || 0,
-        assists: pStats.assists || 0,
-        penalty_minutes: pStats.penalty_minutes || 0,
-        plus_minus: pStats.plus_minus || 0,
-        wins: pStats.wins || 0,
-        saves: pStats.saves || 0,
-        goals_against: pStats.goals_against || 0,
-      }
-    })
+    // 1. Ta bara med spelare där "played" är i-bockat
+    const rowsToUpsert = players
+      .filter((p) => stats[p.id]?.played)
+      .map((p) => {
+        const pStats = stats[p.id] || {}
+        return {
+          match_id: selectedMatchId,
+          player_id: p.id,
+          goals: pStats.goals || 0,
+          assists: pStats.assists || 0,
+          penalty_minutes: pStats.penalty_minutes || 0,
+          plus_minus: pStats.plus_minus || 0,
+          wins: pStats.wins || 0,
+          saves: pStats.saves || 0,
+          goals_against: pStats.goals_against || 0,
+        }
+      })
 
-    const { error } = await supabase
+    // 2. Ta bort gamla rader för spelare som bockats ur
+    await supabase
       .from('player_match_stats')
-      .upsert(rowsToUpsert, { onConflict: 'player_id,match_id' })
+      .delete()
+      .eq('match_id', selectedMatchId)
 
-    if (error) {
-      alert('Kunde inte spara statistik: ' + error.message)
-    } else {
-      alert('Statistik sparad!')
-      onStatsUpdated()
+    // 3. Spara enbart ikryssade spelare
+    if (rowsToUpsert.length > 0) {
+      const { error } = await supabase
+        .from('player_match_stats')
+        .upsert(rowsToUpsert, { onConflict: 'player_id,match_id' })
+
+      if (error) {
+        alert('Kunde inte spara statistik: ' + error.message)
+        return
+      }
     }
+
+    alert('Statistik sparad!')
+    onStatsUpdated()
   }
 
   return (
@@ -247,124 +272,133 @@ export default function MatchManager({
             <div>
               <h3 style={{ color: '#FFD25F', marginBottom: '12px' }}>Fyll i statistik:</h3>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#001F3F', color: '#FFD25F', textAlign: 'left' }}>
-                      <th style={{ padding: '8px' }}>Spelare</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>Mål</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>Ass</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>UTV</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>+/-</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Vinst</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Räddn.</th>
-                      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Insläppta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {players.map((p) => {
-                      const pStats = stats[p.id] || {}
-                      const isGoalie = p.position === 'Målvakt'
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+  <thead>
+    <tr style={{ backgroundColor: '#001F3F', color: '#FFD25F', textAlign: 'left' }}>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Deltog</th>
+      <th style={{ padding: '8px' }}>Spelare</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Mål</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Ass</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>UTV</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>+/-</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Vinst</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Räddn.</th>
+      <th style={{ padding: '8px', textAlign: 'center' }}>Målvakt: Insläppta</th>
+    </tr>
+  </thead>
+  <tbody>
+    {players.map((p) => {
+      const pStats = stats[p.id] || {}
+      const isGoalie = p.position === 'Målvakt'
 
-                      return (
-                        <tr key={p.id} style={{ borderBottom: '1px solid #002850' }}>
-                          <td style={{ padding: '8px', fontWeight: 'bold' }}>
-                            {p.name} <span style={{ fontSize: '11px', color: '#B0C4DE' }}>({p.position})</span>
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              value={pStats.goals ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(p.id, 'goals', parseInt(e.target.value) || 0)
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              value={pStats.assists ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(p.id, 'assists', parseInt(e.target.value) || 0)
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              value={pStats.penalty_minutes ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(
-                                  p.id,
-                                  'penalty_minutes',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              value={pStats.plus_minus ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(
-                                  p.id,
-                                  'plus_minus',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              disabled={!isGoalie}
-                              checked={pStats.wins === 1}
-                              onChange={(e) =>
-                                handleStatChange(p.id, 'wins', e.target.checked ? 1 : 0)
-                              }
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              disabled={!isGoalie}
-                              value={pStats.saves ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(p.id, 'saves', parseInt(e.target.value) || 0)
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              min="0"
-                              disabled={!isGoalie}
-                              value={pStats.goals_against ?? 0}
-                              onChange={(e) =>
-                                handleStatChange(
-                                  p.id,
-                                  'goals_against',
-                                  parseInt(e.target.value) || 0
-                                )
-                              }
-                              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
-                            />
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+      return (
+        <tr key={p.id} style={{ borderBottom: '1px solid #002850', opacity: pStats.played ? 1 : 0.6 }}>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="checkbox"
+              checked={!!pStats.played}
+              onChange={(e) =>
+                handleStatChange(p.id, 'played', e.target.checked)
+              }
+            />
+          </td>
+          <td style={{ padding: '8px', fontWeight: 'bold' }}>
+            {p.name} <span style={{ fontSize: '11px', color: '#B0C4DE' }}>({p.position})</span>
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              value={pStats.goals ?? 0}
+              onChange={(e) =>
+                handleStatChange(p.id, 'goals', parseInt(e.target.value) || 0)
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              value={pStats.assists ?? 0}
+              onChange={(e) =>
+                handleStatChange(p.id, 'assists', parseInt(e.target.value) || 0)
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              value={pStats.penalty_minutes ?? 0}
+              onChange={(e) =>
+                handleStatChange(
+                  p.id,
+                  'penalty_minutes',
+                  parseInt(e.target.value) || 0
+                )
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              value={pStats.plus_minus ?? 0}
+              onChange={(e) =>
+                handleStatChange(
+                  p.id,
+                  'plus_minus',
+                  parseInt(e.target.value) || 0
+                )
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="checkbox"
+              disabled={!isGoalie}
+              checked={pStats.wins === 1}
+              onChange={(e) =>
+                handleStatChange(p.id, 'wins', e.target.checked ? 1 : 0)
+              }
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              disabled={!isGoalie}
+              value={pStats.saves ?? 0}
+              onChange={(e) =>
+                handleStatChange(p.id, 'saves', parseInt(e.target.value) || 0)
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+          <td style={{ padding: '8px', textAlign: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              disabled={!isGoalie}
+              value={pStats.goals_against ?? 0}
+              onChange={(e) =>
+                handleStatChange(
+                  p.id,
+                  'goals_against',
+                  parseInt(e.target.value) || 0
+                )
+              }
+              style={{ width: '50px', textAlign: 'center', padding: '4px' }}
+            />
+          </td>
+        </tr>
+      )
+    })}
+  </tbody>
+</table>
 
               <button
                 type="button"
