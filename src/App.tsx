@@ -375,7 +375,7 @@ export default function App() {
                     onClick={() => handleSort('gp')}
                     style={{ padding: '12px', cursor: 'pointer', textAlign: 'center' }}
                   >
-                    ST {sortField === 'gp' ? (sortAsc ? '▲' : '▼') : ''}
+                    Matcher {sortField === 'gp' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
 
                   {activeTab === 'skaters' ? (
