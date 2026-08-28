@@ -57,6 +57,7 @@ export default function MatchManager({
       const statsMap: Record<string, any> = {}
       data.forEach((row) => {
         statsMap[row.player_id] = {
+          played: true,
           goals: row.goals || 0,
           assists: row.assists || 0,
           penalty_minutes: row.penalty_minutes || 0,
@@ -89,22 +90,33 @@ export default function MatchManager({
     }
   }
 
-  const handleStatChange = (playerId: string, field: string, value: number) => {
-    setStats((prev) => ({
-      ...prev,
-      [playerId]: {
-        ...(prev[playerId] || {
-          goals: 0,
-          assists: 0,
-          penalty_minutes: 0,
-          plus_minus: 0,
-          wins: 0,
-          saves: 0,
-          goals_against: 0,
-        }),
-        [field]: value,
-      },
-    }))
+  const handleStatChange = (playerId: string, field: string, value: any) => {
+    setStats((prev) => {
+      const current = prev[playerId] || {
+        played: false,
+        goals: 0,
+        assists: 0,
+        penalty_minutes: 0,
+        plus_minus: 0,
+        wins: 0,
+        saves: 0,
+        goals_against: 0,
+      }
+
+      let autoPlayed = current.played
+      if (field !== 'played' && typeof value === 'number' && value !== 0) {
+        autoPlayed = true
+      }
+
+      return {
+        ...prev,
+        [playerId]: {
+          ...current,
+          played: field === 'played' ? value : autoPlayed,
+          [field]: value,
+        },
+      }
+    })
   }
 
   const handleSaveStats = async () => {
@@ -113,31 +125,41 @@ export default function MatchManager({
       return
     }
 
-    const rowsToUpsert = players.map((p) => {
-      const pStats = stats[p.id] || {}
-      return {
-        match_id: selectedMatchId,
-        player_id: p.id,
-        goals: pStats.goals || 0,
-        assists: pStats.assists || 0,
-        penalty_minutes: pStats.penalty_minutes || 0,
-        plus_minus: pStats.plus_minus || 0,
-        wins: pStats.wins || 0,
-        saves: pStats.saves || 0,
-        goals_against: pStats.goals_against || 0,
-      }
-    })
+    const rowsToUpsert = players
+      .filter((p) => stats[p.id]?.played)
+      .map((p) => {
+        const pStats = stats[p.id] || {}
+        return {
+          match_id: selectedMatchId,
+          player_id: p.id,
+          goals: pStats.goals || 0,
+          assists: pStats.assists || 0,
+          penalty_minutes: pStats.penalty_minutes || 0,
+          plus_minus: pStats.plus_minus || 0,
+          wins: pStats.wins || 0,
+          saves: pStats.saves || 0,
+          goals_against: pStats.goals_against || 0,
+        }
+      })
 
-    const { error } = await supabase
+    await supabase
       .from('player_match_stats')
-      .upsert(rowsToUpsert, { onConflict: 'player_id,match_id' })
+      .delete()
+      .eq('match_id', selectedMatchId)
 
-    if (error) {
-      alert('Kunde inte spara statistik: ' + error.message)
-    } else {
-      alert('Statistik sparad!')
-      onStatsUpdated()
+    if (rowsToUpsert.length > 0) {
+      const { error } = await supabase
+        .from('player_match_stats')
+        .upsert(rowsToUpsert, { onConflict: 'player_id,match_id' })
+
+      if (error) {
+        alert('Kunde inte spara statistik: ' + error.message)
+        return
+      }
     }
+
+    alert('Statistik sparad!')
+    onStatsUpdated()
   }
 
   return (
@@ -174,7 +196,6 @@ export default function MatchManager({
 
       {isOpen && (
         <div style={{ padding: '0 24px 24px 24px' }}>
-          {/* Skapa ny match */}
           <form
             onSubmit={handleCreateMatch}
             style={{
@@ -216,7 +237,6 @@ export default function MatchManager({
             </button>
           </form>
 
-          {/* Välj match att redigera */}
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>
               Välj match att fylla i / ändra statistik för:
@@ -242,7 +262,6 @@ export default function MatchManager({
             </select>
           </div>
 
-          {/* Registrera stats för vald match */}
           {selectedMatchId && (
             <div>
               <h3 style={{ color: '#FFD25F', marginBottom: '12px' }}>Fyll i statistik:</h3>
@@ -250,6 +269,7 @@ export default function MatchManager({
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#001F3F', color: '#FFD25F', textAlign: 'left' }}>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Deltog</th>
                       <th style={{ padding: '8px' }}>Spelare</th>
                       <th style={{ padding: '8px', textAlign: 'center' }}>Mål</th>
                       <th style={{ padding: '8px', textAlign: 'center' }}>Ass</th>
@@ -266,7 +286,16 @@ export default function MatchManager({
                       const isGoalie = p.position === 'Målvakt'
 
                       return (
-                        <tr key={p.id} style={{ borderBottom: '1px solid #002850' }}>
+                        <tr key={p.id} style={{ borderBottom: '1px solid #002850', opacity: pStats.played ? 1 : 0.6 }}>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!pStats.played}
+                              onChange={(e) =>
+                                handleStatChange(p.id, 'played', e.target.checked)
+                              }
+                            />
+                          </td>
                           <td style={{ padding: '8px', fontWeight: 'bold' }}>
                             {p.name} <span style={{ fontSize: '11px', color: '#B0C4DE' }}>({p.position})</span>
                           </td>
